@@ -1,0 +1,352 @@
+---
+title: "Assignment 3"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Please show all the steps and keep the final answer 3-4 decimal places. You should use R for the applied questions. 
+
+## Unit 05 Decision Trees
+
+1. Lecture note example in page 18, please calculate
+
+Initial Cross-entropy: $D=-\sum_{k=1}^K\hat{p_k}log_2\hat{p_k}=-(\frac{16}{30}log_2(\frac{16}{30})+\frac{14}{30}log_2\frac{14}{30})=0.9968$
+
+Cross-entropy: sub node for balance < 50k $D=-(\frac{12}{13}log_2(\frac{12}{13})+\frac{1}{13}log_2\frac{1}{13})=0.3912$
+
+Cross-entropy: sub node for balance $\ge$ 50k $D=-(\frac{4}{17}log_2(\frac{4}{17})+\frac{13}{17}log_2\frac{13}{17})=0.7871$
+
+Weighted Cross-entropy for balance: $WG(Balance)=\frac{13}{30}(0.3912)+\frac{17}{30}(0.3912)=0.6155$
+
+Information gain by splitting on the “balance” feature: $Information Gain=0.9968-0.6155=0.3813$
+
+2. Textbook questions 4, page 362
+(a)
+
+```{r echo=FALSE, out.width="100%"}
+knitr::include_graphics("642 A3 q2.jpg",error=FALSE)
+
+```
+
+(b)
+
+```{r echo=FALSE, out.width="100%"}
+knitr::include_graphics("642 A3 q2b.jpg",error=FALSE)
+
+```
+
+3. Textbook question 8, page 363
+(a)
+
+```{r}
+library(ISLR2)
+library(caret)
+
+attach(Carseats)
+
+set.seed(42)
+split <- createDataPartition(y = Sales, p = 0.5, list = FALSE)
+
+Carseats_train <- Carseats[split, ]
+Carseats_test <- Carseats[-split, ]
+```
+
+(b)
+
+```{r}
+library(tree)
+
+carseats_train_model1<-tree(Sales~.,Carseats_train)
+summary(carseats_train_model1)
+
+plot(carseats_train_model1)
+text(carseats_train_model1, pretty = 0)
+
+carseats_model1_pred <- predict(carseats_train_model1, newdata = Carseats_test)
+mse<-mean((Carseats_test$Sales-carseats_model1_pred)^2)
+mse
+```
+
+As we can see, the test MSE for a full regression tree is 5.1369. This tree we can see in the plot branches off many times, which may cause the data to quickly overfit.
+
+(c)
+
+```{r}
+# Cross validation
+set.seed(1)
+cv_trees <- cv.tree(carseats_train_model1)
+cv_trees
+plot(cv_trees$size , cv_trees$dev, type = "b")
+
+prune_trees <- prune.tree(carseats_train_model1, best=10)
+plot(prune_trees)
+text(prune_trees, pretty=0)
+
+carseats_prune10_pred <- predict(prune_trees, newdata = Carseats_test)
+mse_prune<-mean((Carseats_test$Sales-carseats_prune10_pred)^2)
+mse_prune
+```
+
+As we can see, pruning the tree and lowering the complexity of the tree slightly decreases the MSE to 4.999123 in our testing data. Our optimal level was a tree of size 10. This is because there is less overfitting compared to our previous tree.
+
+(d)
+
+```{r}
+library(randomForest)
+set.seed(1)
+bagging_model <- randomForest(Sales ~ ., data = Carseats_train, mtry = 10, importance = TRUE)
+
+carseats_bag_pred <- predict(bagging_model, newdata = Carseats_test)
+mse_bag<-mean((Carseats_test$Sales-carseats_bag_pred)^2)
+mse_bag
+
+importance(bagging_model)
+```
+
+We notice that the MSE is significantly decreased when bagging (mtry=10 uses all predictors). The MSE is 2.586186. We also notice that Price and ShelveLoc are the most important variables in our predictions. 
+
+(e)
+
+```{r}
+# mtry=3 since sqrt(10) is closest to 3
+set.seed(1)
+rforest_model <- randomForest(Sales ~ ., data = Carseats_train, mtry = 3, importance = TRUE)
+
+carseats_forest_pred <- predict(rforest_model, newdata = Carseats_test)
+mse_rf<-mean((Carseats_test$Sales-carseats_forest_pred)^2)
+mse_rf
+
+importance(rforest_model)
+```
+
+As we notice, the random forest has a slightly higher MSE compared to bagging of 3.30669. ShelveLoc and Price are still the most important variables in our model. the effect that $m$ has on the models is that, if $m$ is low the trees should contribute to lower overfitting and higher bias since less predictors are considered at each split. We notice that too low of an $m$ value will reduce the efficiency of the model. When we tried bagging, the model was prone to higher overfitting and lower bias since more variables are considered at each split. trying different mtry values will give a sweetspot of where the MSE is the lowest.
+
+(f)
+
+```{r}
+library(BART)
+set.seed(1)
+n <- nrow(Carseats)
+train_ind <- sample(1:n, n / 2)
+
+x <- Carseats[, -which(names(Carseats) == "Sales")]
+y <- Carseats$Sales
+
+xtrain <- x[train_ind, ]
+ytrain <- y[train_ind]
+xtest <- x[-train_ind, ]
+ytest <- y[-train_ind]
+
+set.seed(1)
+bart <- gbart(xtrain, ytrain, x.test = xtest)
+
+bart_pred <- bart$yhat.test.mean
+bart_mse <- mean((ytest - bart_pred)^2)
+bart_mse
+
+ord <- order(bart$varcount.mean, decreasing = T)
+bart$varcount.mean[ord]
+```
+
+As we can see for our carseats data, BART gives the lowest MSE (1.450842) out of all the models.We see that Price appeared the most in the collection of trees, meaning it is a very important feature in any of the models we have made today.
+
+## Unit 06 Support Vector Machine
+
+1. Lecture note page 5. For each data point $x_i = (x_{i1}, \dots, x_{ip})$ with label $y_i$, show that the perpendicular distance from the this point to the hyperplane $f (x) = \beta_0 + \beta^T x = 0$ is given by
+$$
+d_i = \frac{y_i (\beta_0 + \beta^T x)}{||\beta||}
+$$
+
+ANSWER: So, given we have points $x_i = (x_{i1}, \dots, x_{ip})$ and the hyperplane $f (x) = \beta_0 + \beta^T x = 0$, we see that the perpendicular distance is given by $$d_i = \frac{ (\beta_0 + \beta^T x)}{||\beta||}$$
+
+Because we want to classify the points, the sign of $d_i$ tells us which side of the hyperplane the point lies on. $y_i \in \{-1,1\}$, being the class label tells us which side the point lies on.
+
+Thus, the signed perpendicular distance of a point is given by: $d_i = \frac{y_i (\beta_0 + \beta^T x)}{||\beta||}$
+
+If $y_i=1$ then $d_i = \frac{ (\beta_0 + \beta^T x)}{||\beta||}$
+
+If $y_i=0$ then $d_i = \frac{- (\beta_0 + \beta^T x)}{||\beta||}$
+
+2. Textbook question 1, part (a) - (e), page 399
+
+(a)
+
+```{r}
+x <- c(3, 2, 4, 1, 2, 4, 4)
+y <- c(4, 2, 4, 4, 1, 3, 1)
+plot (x, y)
+```
+
+```{r echo=FALSE, out.width="100%"}
+knitr::include_graphics("q3a.jpg",error=FALSE)
+
+```
+
+(b)
+
+```{r echo=FALSE, out.width="100%"}
+knitr::include_graphics("q3b.jpg",error=FALSE)
+
+```
+
+We want the hyperplane in the form $\beta_0+\beta_1x_1+\beta_2x_2=0$
+
+The hyperplane passes between $(2,1)$ and $(2,2)$ as well as $(4,3)$ and $(4,4)$ so it should pass through the points $(2,1.5)$ and $(4,3.5)$
+
+our direction vector $v=(4-2,3.5-1.5)=(2,2)$
+
+Since $(\beta_1,\beta_2)$ must be orthogonal to $v$, $2\beta_1+2\beta_2=0 =>\beta_1+\beta_2=0$
+
+we can conclude that $\beta_1=1$ and $\beta_2=-1$
+
+Choosing the point $(2,1.5)$, we can solve for $\beta_0$ by plugging our values in the hyperplane equation
+
+$\beta_0+\beta_1x_1+\beta_2x_2=0 => \beta_0 +2-1.5=0=> \beta_0=-0.5$
+
+so our optimal hyperplane equation is given by $-0.5+x_1-x_2=0$
+
+(c) Classify to Red if $-0.5+x_1-x_2<0$
+
+Classify to Blue otherwise
+
+(d)
+
+```{r echo=FALSE, out.width="100%"}
+knitr::include_graphics("q3d.jpg",error=FALSE)
+
+```
+
+The margin distance is $\frac{1}{4}$
+
+(e)
+
+Observations 2,3,5,6 are support vectors. Observations 2 and 3 are of Red class while observations 5 and 6 are of blue class.
+
+3. Textbook question 8, page 402
+
+(a)
+
+```{r}
+library(ISLR2)
+data(OJ)
+set.seed(1)
+
+n <- nrow(OJ)
+
+train_ind <- sample(1:n,800)
+train <- OJ[train_ind, ]
+test <- OJ[-train_ind, ]
+
+cat("Train size:", nrow(train), "\n")
+cat("Test size:", nrow(test), "\n")
+```
+
+(b)
+
+```{r}
+library(e1071)
+
+svm_model <- svm(Purchase ~ ., data = train, kernel = "linear", cost = 0.01)
+
+summary(svm_model)
+```
+
+As we can see, there are 435 support vectors for this data which may indicate that a lot of the data is near the decision boundary and not very easy to properly separate.
+
+(c)
+
+```{r}
+# Training predictions
+set.seed(1)
+train_pred <- predict(svm_model,train)
+
+# Testing predictions
+test_pred <- predict(svm_model,test)
+
+train_error <- mean(train_pred != train$Purchase)
+test_error <- mean(test_pred != test$Purchase)
+train_error
+test_error
+```
+
+The training error is slightly lower than the testing error, which makes sense since the training data was used for the model.
+
+(d)
+
+```{r}
+tune <- tune(svm, Purchase ~ ., data = train, kernel = "linear",
+                    ranges = list(cost = c(0.01, 0.1, 1, 10)))
+
+summary(tune)
+```
+
+cost= 0.10 is the best parameter value since it gave us the lowest error rate
+
+(e)
+
+```{r}
+best_tune <- tune$best.model
+# Training predictions
+set.seed(1)
+train_pred_tune <- predict(best_tune,train)
+
+# Testing predictions
+test_pred_tune <- predict(best_tune,test)
+
+train_error_tune <- mean(train_pred_tune != train$Purchase)
+test_error_tune <- mean(test_pred_tune != test$Purchase)
+train_error_tune
+test_error_tune
+```
+
+The training error and testing error decreased, meaning this model did improve.
+
+(f)
+
+```{r}
+radial_model <- svm(Purchase ~ ., data = train, kernel = "radial", cost = 0.1)
+# Training predictions
+set.seed(1)
+train_pred_rad <- predict(radial_model,train)
+
+
+# Testing predictions
+test_pred_rad <- predict(radial_model,test)
+
+train_error_rad <- mean(train_pred_rad != train$Purchase)
+test_error_rad <- mean(test_pred_rad != test$Purchase)
+train_error_rad
+test_error_rad
+```
+
+As we can see on our testing data, the radial models error went up slightly.
+
+(g)
+
+```{r}
+poly_model <- svm(Purchase ~ ., data = train, kernel = "polynomial", degree = 2, cost = 0.1)
+# Training predictions
+set.seed(1)
+train_pred_poly <- predict(poly_model,train)
+
+
+# Testing predictions
+test_pred_poly <- predict(poly_model,test)
+
+train_error_poly <- mean(train_pred_poly != train$Purchase)
+test_error_poly <- mean(test_pred_poly != test$Purchase)
+train_error_poly
+test_error_poly
+```
+
+(h) The tuned SVM model with cost=0.1 had the lowest training error meaning that it performed the best on unseen data. The polynomial SVM kernel performed the worst significantly with very high error relative to the rest. The radial kernel also did not give results as great as the tuned model.
+
+
+
+
